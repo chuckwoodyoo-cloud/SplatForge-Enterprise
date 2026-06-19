@@ -1,0 +1,52 @@
+@use 'colors.scss' as *;
+
+#mode-toggle {
+    position: absolute;
+    left: calc(50% - 60px);
+    top: 0px;
+    width: 120px;
+
+    padding: 0px 8px;
+    border-radius: 0px 0px 6px 6px;
+
+    background:
+        linear-gradient(90deg, rgba(255, 184, 107, 0.16), rgba(51, 214, 197, 0.12)),
+        rgba(8, 15, 18, 0.9);
+    border: 1px solid rgba(51, 214, 197, 0.16);
+    border-top: 0;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.36);
+    backdrop-filter: blur(12px);
+    z-index: 5;
+
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+
+    cursor: pointer;
+
+    &.centers-mode {
+        #rings-icon, #rings-text {
+            display: none;
+        }
+    }
+
+    &.rings-mode {
+        #centers-icon, #centers-text {
+            display: none;
+        }
+    }
+
+    #centers-icon {
+        color: $clr-hilight;
+    }
+
+    #rings-icon {
+        color: $clr-hilight;
+    }
+
+    &:hover {
+        color: $text-primary;
+        background-color: rgba(51, 214, 197, 0.12);
+    }
+}

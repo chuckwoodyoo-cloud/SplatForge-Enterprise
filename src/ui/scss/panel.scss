@@ -1,0 +1,71 @@
+@use 'colors.scss' as *;
+
+.panel {
+    position: absolute;
+    border-radius: 8px;
+    overflow: hidden;
+
+    background-color: rgba(9, 17, 19, 0.88);
+    border: 1px solid rgba(51, 214, 197, 0.16);
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(12px) saturate(1.18);
+
+    & > .panel-header {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        padding: 4px 5px;
+
+        background:
+            linear-gradient(90deg, rgba(51, 214, 197, 0.18), rgba(255, 184, 107, 0.07) 62%, rgba(9, 17, 19, 0.96)),
+            $bcg-dark;
+        border-bottom: 1px solid rgba(51, 214, 197, 0.12);
+
+        & > .panel-header-icon {
+            font-family: pc-icon;
+            font-weight: bold;
+            font-size: 13px;
+            color: $clr-icon-hilight;
+        }
+
+        & > .panel-header-label {
+            color: $text-primary;
+            font-weight: bold;
+            flex-grow: 1;
+            text-transform: uppercase;
+        }
+    }
+
+    .panel-header-button {
+        font-family: pc-icon;
+        font-weight: bold;
+        font-size: 13px;
+        color: $clr-hilight;
+    
+        padding: 4px;
+        flex-grow: 0;
+        flex-shrink: 0;
+
+        border-radius: 4px;
+
+        display: flex;
+        align-items: center;
+        justify-content: center;
+
+        svg {
+            color: $clr-hilight;
+        }
+    
+        &:hover {
+            color: $clr-icon-hilight;
+            background-color: rgba(51, 214, 197, 0.14);
+            cursor: pointer;
+        }
+    }
+
+    .panel-header-spacer {
+        flex-grow: 1;
+        padding: 0px;
+        margin: 0px;
+    }
+}

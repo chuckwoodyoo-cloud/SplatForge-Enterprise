@@ -1,0 +1,333 @@
+@use 'pcui-theme-grey.scss';
+@use 'colors.scss' as *;
+@use 'tooltips.scss';
+@use 'panel.scss';
+@use 'menu-panel.scss';
+@use 'menu.scss';
+@use 'scene-panel.scss';
+@use 'view-panel.scss';
+@use 'color-panel.scss';
+@use 'splat-list.scss';
+@use 'transform.scss';
+@use 'bottom-toolbar.scss';
+@use 'right-toolbar.scss';
+@use 'select-toolbar.scss';
+@use 'data-panel.scss';
+@use 'popup.scss';
+@use 'mode-toggle.scss';
+@use 'settings-dialog.scss';
+@use 'spinner.scss';
+@use 'progress.scss';
+@use 'export-popup.scss';
+@use 'shortcuts-popup.scss';
+@use 'about-popup.scss';
+@use 'timeline-panel.scss';
+@use 'status-bar.scss';
+@use 'tool.scss';
+
+* {
+    font-size: 12px;
+    user-select: none;
+    overscroll-behavior: none;
+}
+
+html {
+    height: 100%;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    max-height: 100%;
+    background-color: #04080a;
+    overflow: hidden;
+    touch-action: none;
+}
+
+#app-container {
+    width: 100%;
+    height: 100%;
+
+    &.enterprise-shell {
+        background:
+            repeating-linear-gradient(90deg, rgba(51, 214, 197, 0.03) 0 1px, transparent 1px 96px),
+            linear-gradient(180deg, #081012 0%, #030607 100%);
+    }
+}
+
+#editor-container {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: row;
+}
+
+#main-container {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    flex-grow: 1;
+}
+
+#sep-container {
+    background-color: $bcg-darker;
+}
+
+#sep-container > span {
+    color: white;
+}
+
+#coord-space-toggle.active {
+    background-color: $bcg-dark !important;
+    color: $clr-hilight;
+}
+
+#file-selector {
+    display: none;
+}
+
+#file-menu {
+    position: absolute;
+}
+
+.file-menu-item span {
+    padding: 6px;
+    color: $text-secondary !important;
+    font-size: 14px;
+}
+
+#app-label {
+    position: absolute;
+    right: 20px;
+    bottom: 20px;
+    z-index: 4;
+    color: rgba(246, 255, 252, 0.86);
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Consolas', monospace;
+    font-size: 11px;
+    text-shadow: 0 1px 8px #000;
+    padding: 4px 8px;
+    border: 1px solid rgba(51, 214, 197, 0.22);
+    background-color: rgba(4, 9, 10, 0.48);
+    clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+
+#cursor-label {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    z-index: 4;
+    color: $text-primary;
+    text-shadow: 1px 1px 4px black;
+
+    padding: 8px;
+    border-radius: 2px;
+    border: 1px solid rgba(51, 214, 197, 0.18);
+    background-color: rgba(4, 9, 10, 0.42);
+
+    cursor: pointer;
+
+    &:hover {
+        border: 1px solid $clr-hilight;
+        background-color: rgba(8, 27, 28, 0.78);
+    }
+}
+
+#recording-indicator {
+    position: absolute;
+    left: 50%;
+    top: 48px;
+    transform: translateX(-50%);
+    z-index: 3;
+
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    padding: 6px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(240, 79, 69, 0.68);
+    background-color: rgba(4, 9, 10, 0.86);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.42), inset 0 0 0 1px rgba(255, 184, 107, 0.16);
+    pointer-events: all;
+
+    #recording-time {
+        color: $text-primary;
+        text-shadow: 1px 1px 4px black;
+        white-space: nowrap;
+
+        &::before {
+            content: '';
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            margin-right: 6px;
+            border-radius: 50%;
+            background-color: #ff2d2d;
+            box-shadow: 0 0 8px #ff2d2d;
+        }
+    }
+
+    #stop-recording {
+        height: 22px;
+        margin: 0;
+        border-radius: 4px;
+    }
+
+    &.pcui-hidden {
+        display: none;
+    }
+}
+
+#view-cube-container {
+    position: absolute;
+    width: 140px;
+    height: 140px;
+    right: 0px;
+    top: 0px;
+    z-index: 4;
+    pointer-events: none;
+}
+
+#mask-canvas {
+    display: none;
+    position: absolute;
+    opacity: 0.4;
+}
+
+#canvas-container {
+    width: 100%;
+    display: flex;
+    position: relative;
+    overflow: hidden;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    flex-grow: 1;
+}
+
+#algorithm-shell-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0.28;
+    mix-blend-mode: screen;
+    background:
+        linear-gradient(90deg, rgba(51, 214, 197, 0.18), transparent 18%, transparent 82%, rgba(255, 184, 107, 0.12)),
+        repeating-linear-gradient(0deg, transparent 0 47px, rgba(51, 214, 197, 0.08) 48px),
+        repeating-linear-gradient(90deg, transparent 0 71px, rgba(255, 184, 107, 0.06) 72px);
+
+    &::before {
+        content: '';
+        position: absolute;
+        inset: 14px;
+        border: 1px solid rgba(51, 214, 197, 0.26);
+        clip-path: polygon(0 0, 19% 0, 19% 1px, 81% 1px, 81% 0, 100% 0, 100% 21%, calc(100% - 1px) 21%, calc(100% - 1px) 79%, 100% 79%, 100% 100%, 81% 100%, 81% calc(100% - 1px), 19% calc(100% - 1px), 19% 100%, 0 100%, 0 79%, 1px 79%, 1px 21%, 0 21%);
+    }
+
+    &::after {
+        display: none;
+    }
+}
+
+#tools-container {
+    display: none;
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    z-index: 5;
+    cursor: crosshair;
+    &.noevents {
+        pointer-events: none;
+    }
+}
+
+#canvas {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    z-index: 0;
+    image-rendering: auto;
+}
+
+#tooltips-container {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 20;
+}
+
+#top-container {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 20;
+}
+
+// placeholder
+.pcui-input-element[placeholder] {
+    &::after {
+        color: $text-darkest;
+    }
+}
+
+.pcui-vector-input {
+    margin-left: 6px;
+    margin-right: 6px;
+}
+
+/* scrollbar styling */
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-track {
+    background: $bcg-darkest;
+}
+::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, rgba(51, 214, 197, 0.46), rgba(255, 184, 107, 0.36));
+}
+::-webkit-scrollbar-thumb:hover {
+    background: $clr-hilight;
+}
+::-webkit-scrollbar-corner {
+    background: $bcg-darkest;
+}
+
+.font-thin {
+    font-family: 'Proxima Nova Thin', 'Helvetica Neue', Arial, Helvetica, sans-serif;
+    font-weight: 100;
+    font-style: normal;
+}
+
+.font-light {
+    font-family: 'Proxima Nova Light', 'Helvetica Neue', Arial, Helvetica, sans-serif;
+    font-weight: 200;
+    font-style: normal;
+}
+
+.font-regular {
+    font-family: 'Proxima Nova Regular', 'Helvetica Neue', Arial, Helvetica, sans-serif;
+    font-weight: normal;
+    font-style: normal;
+}
+
+.font-bold {
+    font-family: 'Proxima Nova Bold', 'Helvetica Neue', Arial, Helvetica, sans-serif;
+    font-weight: bold;
+    font-style: normal;
+}

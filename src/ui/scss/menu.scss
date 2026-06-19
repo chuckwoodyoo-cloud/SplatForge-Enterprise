@@ -1,0 +1,97 @@
+@use 'colors.scss' as *;
+
+#menu {
+    position: absolute;
+    z-index: 6;
+}
+
+#menu-bar {
+    transition: width 0.1s ease;
+
+    position: absolute;
+    top: 24px;
+    left: 24px;
+    height: 50px;
+    border-radius: 6px;
+
+    overflow: hidden;
+
+    background:
+        linear-gradient(90deg, rgba(51, 214, 197, 0.12), rgba(255, 184, 107, 0.08) 64%, rgba(6, 13, 15, 0.94)),
+        rgba(9, 17, 19, 0.92);
+    border: 1px solid rgba(51, 214, 197, 0.18);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(12px);
+    clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+#menu-arrow {
+    display: none;
+}
+
+#menu-container {
+    display: flex;
+    flex-direction: column;
+}
+
+#menu-bar-options {
+    display: flex;
+    flex-direction: row;
+    flex-grow: 1;
+}
+
+.menu-icon {
+    width: 16px;
+    height: 16px;
+    padding: 16px 10px;
+    margin: 0px;
+    flex-grow: 1;
+    color: $text-secondary;
+
+    cursor: pointer;
+    &:hover {
+        color: $text-primary;
+        background-color: rgba(51, 214, 197, 0.12);
+    }
+}
+
+.menu-option {
+    padding: 16px 20px;
+    margin: 0px;
+    flex-grow: 1;
+    text-align: center;
+    text-overflow: clip;
+
+    background-color: transparent;
+
+    cursor: pointer;
+
+    &:hover {
+        color: $text-primary;
+        background-color: rgba(51, 214, 197, 0.12);
+    }
+}
+
+.collapsed {
+    #menu-bar {
+        width: auto;
+        height: auto;
+    }
+
+    #menu-collapse {
+        display: none;
+    }
+
+    #menu-arrow {
+        display: block;
+        padding: 10px;
+    }
+
+    .menu-option {
+        display: none;
+    }
+}

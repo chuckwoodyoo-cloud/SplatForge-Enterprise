@@ -1,0 +1,24 @@
+@use 'pcui-theme-grey.scss' as theme;
+
+$text-primary: theme.$text-primary;
+$text-secondary: theme.$text-secondary;
+$text-dark: theme.$text-dark;
+$text-darkest: theme.$text-darkest;
+
+$error: theme.$error;
+
+$clr-default: #a9b8b6;
+$clr-disabled: #566563;
+$clr-active: #f6fffc;
+$clr-hilight: #33d6c5;
+$clr-icon-hilight: #ffb86b;
+
+$bcg-lighter: #263737;
+$bcg-light: #1f3031;
+$bcg-primary: #10191b;
+$bcg-dark: #0b1316;
+$bcg-darker: #071012;
+$bcg-darkest: #04080a;
+
+// darken amount when showing modal dialogs
+$bcg-darken: rgba(1, 7, 9, 0.58);

@@ -1,0 +1,25 @@
+@use 'colors.scss' as *;
+
+.tooltips {
+    position: absolute;
+    background-color: rgba(5, 13, 15, 0.94);
+    border: 1px solid rgba(51, 214, 197, 0.2);
+    border-radius: 4px;
+    padding: 6px 8px;
+    box-sizing: border-box;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.38);
+    backdrop-filter: blur(10px);
+}
+
+.tooltips-content {
+    display: block;
+    box-sizing: border-box;
+    max-width: min(260px, calc(100vw - 24px));
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+
+    color: $text-primary;
+    font-size: 12px;
+    margin: 0;
+}
