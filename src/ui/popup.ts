@@ -142,8 +142,27 @@ class Popup extends Container {
             this.hidden = false;
 
             linkRow.hidden = link === undefined;
+            linkText.dom.replaceChildren();
             if (link !== undefined) {
-                linkText.dom.innerHTML = `<a href='${link}' target='_blank'>${link}</a>`;
+                const anchor = document.createElement('a');
+                anchor.target = '_blank';
+                anchor.rel = 'noopener noreferrer';
+                anchor.textContent = link;
+
+                try {
+                    const url = new URL(link, window.location.href);
+                    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+                        throw new Error('unsupported link protocol');
+                    }
+                    anchor.href = url.href;
+                } catch (e) {
+                    anchor.href = '#';
+                    anchor.addEventListener('click', (event) => {
+                        event.preventDefault();
+                    });
+                }
+
+                linkText.dom.append(anchor);
                 linkCopy.icon = 'E352';
             }
 

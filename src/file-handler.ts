@@ -150,7 +150,7 @@ const isLcc = (filenames: string[]) => {
 type ImportFile = {
     filename: string;
     url?: string;
-    contents?: File;
+    contents?: Blob;
     handle?: FileSystemFileHandle;
 };
 
@@ -344,7 +344,23 @@ const initFileHandler = (scene: Scene, events: Events, dropTarget: HTMLElement) 
 
                 if (filename.endsWith('.ssproj')) {
                     // load ssproj document
-                    await events.invoke('doc.load', files[i].contents ?? (await fetch(files[i].url)).arrayBuffer(), files[i].handle);
+                    let contents = files[i].contents;
+                    if (!contents) {
+                        if (!files[i].url) {
+                            await showLoadError('Missing document contents', files[i].filename);
+                            return result;
+                        }
+
+                        const response = await fetch(files[i].url);
+                        if (!response.ok) {
+                            await showLoadError(`Failed to fetch document (${response.statusText})`, files[i].filename);
+                            return result;
+                        }
+
+                        contents = await response.blob();
+                    }
+
+                    await events.invoke('doc.load', contents, files[i].handle, files[i].filename);
                 } else if (['.ply', '.splat', '.sog', '.ksplat', '.spz'].some(ext => filename.endsWith(ext))) {
                     // load gaussian splat model
                     const model = await importSplatModel([files[i]], animationFrame);

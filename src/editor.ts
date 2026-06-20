@@ -24,7 +24,9 @@ type PointSamples = {
     z: number[]
 };
 
-const CLONE_SAMPLE_LIMIT = 80000;
+const CLONE_SOURCE_SAMPLE_LIMIT = 30000;
+const CLONE_SOURCE_FULL_SCAN_LIMIT = 300000;
+const CLONE_TARGET_SAMPLE_LIMIT = 40000;
 const CLONE_MIN_TARGET_NEIGHBORS = 8;
 
 const removeExtension = (filename: string) => {
@@ -85,6 +87,72 @@ const sampleDistancePercentile = (samples: PointSamples, center: Vec3, q: number
     return percentile(distances, q);
 };
 
+const estimateSurfaceNormal = (samples: PointSamples, center: Vec3) => {
+    let ax = 0;
+    let ay = 0;
+    let az = 0;
+    let aLenSq = 0;
+
+    for (let i = 0; i < samples.x.length; ++i) {
+        const dx = samples.x[i] - center.x;
+        const dy = samples.y[i] - center.y;
+        const dz = samples.z[i] - center.z;
+        const lenSq = dx * dx + dy * dy + dz * dz;
+        if (lenSq > aLenSq) {
+            ax = dx;
+            ay = dy;
+            az = dz;
+            aLenSq = lenSq;
+        }
+    }
+
+    if (aLenSq < 1e-10) {
+        return null;
+    }
+
+    let nx = 0;
+    let ny = 0;
+    let nz = 0;
+    let nLenSq = 0;
+
+    for (let i = 0; i < samples.x.length; ++i) {
+        const bx = samples.x[i] - center.x;
+        const by = samples.y[i] - center.y;
+        const bz = samples.z[i] - center.z;
+        const cx = ay * bz - az * by;
+        const cy = az * bx - ax * bz;
+        const cz = ax * by - ay * bx;
+        const lenSq = cx * cx + cy * cy + cz * cz;
+        if (lenSq > nLenSq) {
+            nx = cx;
+            ny = cy;
+            nz = cz;
+            nLenSq = lenSq;
+        }
+    }
+
+    if (nLenSq < 1e-10) {
+        return null;
+    }
+
+    const scale = 1 / Math.sqrt(nLenSq);
+    return new Vec3(nx * scale, ny * scale, nz * scale);
+};
+
+const smallestSpreadAxis = (samples: PointSamples) => {
+    const spreadX = percentile(samples.x, 0.9) - percentile(samples.x, 0.1);
+    const spreadY = percentile(samples.y, 0.9) - percentile(samples.y, 0.1);
+    const spreadZ = percentile(samples.z, 0.9) - percentile(samples.z, 0.1);
+
+    if (spreadX <= spreadY && spreadX <= spreadZ) {
+        return 'x';
+    }
+    if (spreadY <= spreadZ) {
+        return 'y';
+    }
+    return 'z';
+};
+
 const clamp = (value: number, min: number, max: number) => {
     return Math.max(min, Math.min(max, value));
 };
@@ -125,7 +193,7 @@ const registerEditorEvents = (events: Events, editHistory: EditHistory, scene: S
     const collectSourceCloneSamples = (splat: Splat) => {
         const samples = createPointSamples();
         const state = splat.splatData.getProp('state') as Uint8Array;
-        const stride = Math.max(1, Math.ceil(Math.max(1, splat.numSelected) / CLONE_SAMPLE_LIMIT));
+        const stride = Math.max(1, Math.ceil(Math.max(1, splat.numSelected) / CLONE_SOURCE_SAMPLE_LIMIT));
         let selectedSeen = 0;
 
         for (let i = 0; i < state.length; ++i) {
@@ -135,6 +203,9 @@ const registerEditorEvents = (events: Events, editHistory: EditHistory, scene: S
 
             if (selectedSeen % stride === 0 && splat.calcSplatWorldPosition(i, vec)) {
                 pushPointSample(samples, vec);
+                if (sampleCount(samples) >= CLONE_SOURCE_SAMPLE_LIMIT) {
+                    break;
+                }
             }
             selectedSeen++;
         }
@@ -145,7 +216,7 @@ const registerEditorEvents = (events: Events, editHistory: EditHistory, scene: S
     const collectTargetSurfaceSamples = (splat: Splat, center: Vec3, radius: number) => {
         const samples = createPointSamples();
         const state = splat.splatData.getProp('state') as Uint8Array;
-        const stride = Math.max(1, Math.ceil(splat.splatData.numSplats / CLONE_SAMPLE_LIMIT));
+        const stride = Math.max(1, Math.ceil(splat.splatData.numSplats / CLONE_TARGET_SAMPLE_LIMIT));
         const radiusSq = radius * radius;
 
         for (let i = 0; i < state.length; i += stride) {
@@ -166,16 +237,28 @@ const registerEditorEvents = (events: Events, editHistory: EditHistory, scene: S
         return samples;
     };
 
+    const getCloneSourceBoundPlacement = (splat: Splat) => {
+        const anchor = splat.selectionBound.center.clone();
+        splat.worldTransform.transformPoint(anchor, anchor);
+        return {
+            anchor,
+            radius: Math.max(
+                splat.selectionBound.halfExtents.length(),
+                scene.bound.halfExtents.length() * 0.006,
+                0.01
+            )
+        };
+    };
+
     const getCloneSourcePlacement = (splat: Splat) => {
+        if (splat.splatData.numSplats > CLONE_SOURCE_FULL_SCAN_LIMIT) {
+            return getCloneSourceBoundPlacement(splat);
+        }
+
         const samples = collectSourceCloneSamples(splat);
 
         if (sampleCount(samples) === 0) {
-            const anchor = splat.selectionBound.center.clone();
-            splat.worldTransform.transformPoint(anchor, anchor);
-            return {
-                anchor,
-                radius: Math.max(scene.bound.halfExtents.length() * 0.01, 0.01)
-            };
+            return getCloneSourceBoundPlacement(splat);
         }
 
         const anchor = robustCenter(samples);
@@ -209,12 +292,26 @@ const registerEditorEvents = (events: Events, editHistory: EditHistory, scene: S
         }
 
         const surfaceCenter = robustCenter(targetSamples);
-        const maxYOffset = Math.max(sourceRadius, scene.bound.halfExtents.length() * 0.02, 0.02);
+        const maxOffset = Math.max(sourceRadius, scene.bound.halfExtents.length() * 0.02, 0.02);
         const targetAnchor = hitPosition.clone();
+        const normal = estimateSurfaceNormal(targetSamples, surfaceCenter);
 
-        // Keep X/Z exactly where the user clicked for responsiveness, but snap
-        // height toward the local point-cloud surface so copied patches do not float.
-        targetAnchor.y += clamp(surfaceCenter.y - hitPosition.y, -maxYOffset, maxYOffset);
+        if (normal) {
+            const dx = surfaceCenter.x - hitPosition.x;
+            const dy = surfaceCenter.y - hitPosition.y;
+            const dz = surfaceCenter.z - hitPosition.z;
+            const offset = clamp(dx * normal.x + dy * normal.y + dz * normal.z, -maxOffset, maxOffset);
+            targetAnchor.add(normal.mulScalar(offset));
+        } else {
+            const axis = smallestSpreadAxis(targetSamples);
+            if (axis === 'x') {
+                targetAnchor.x += clamp(surfaceCenter.x - hitPosition.x, -maxOffset, maxOffset);
+            } else if (axis === 'y') {
+                targetAnchor.y += clamp(surfaceCenter.y - hitPosition.y, -maxOffset, maxOffset);
+            } else {
+                targetAnchor.z += clamp(surfaceCenter.z - hitPosition.z, -maxOffset, maxOffset);
+            }
+        }
 
         return targetAnchor;
     };

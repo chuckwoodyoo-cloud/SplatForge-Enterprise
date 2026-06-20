@@ -83,7 +83,7 @@ const registerDocEvents = (scene: Scene, events: Events) => {
     };
 
     // load the document from the given file
-    const loadDocument = async (file: File) => {
+    const loadDocument = async (file: Blob) => {
         events.fire('startSpinner');
 
         // Create streaming ZIP reader from the file
@@ -91,14 +91,22 @@ const registerDocEvents = (scene: Scene, events: Events) => {
         const zipFs = new ZipReadFileSystem(blobSource);
 
         try {
-            // reset the scene
-            resetScene();
-
             // read document.json via streaming (only reads what's needed)
             const docSource = await zipFs.createSource('document.json');
-            const docData = await docSource.read().readAll();
-            docSource.close();
+            let docData: Uint8Array;
+            try {
+                docData = await docSource.read().readAll();
+            } finally {
+                docSource.close();
+            }
             const document = JSON.parse(new TextDecoder().decode(docData));
+
+            if (!Array.isArray(document.splats)) {
+                throw new Error('invalid document: missing splats');
+            }
+
+            // reset the scene only after the document header is valid
+            resetScene();
 
             // run through each splat and load it
             for (let i = 0; i < document.splats.length; ++i) {
@@ -134,12 +142,15 @@ const registerDocEvents = (scene: Scene, events: Events) => {
                 currentSelection.getPivot(pivotOrigin, false, transform);
                 pivot.place(transform);
             }
+
+            return true;
         } catch (error) {
             await events.invoke('showPopup', {
                 type: 'error',
                 header: localize('doc.load-failed'),
                 message: `'${error.message ?? error}'`
             });
+            return false;
         } finally {
             // Clean up resources
             zipFs.close();
@@ -212,19 +223,23 @@ const registerDocEvents = (scene: Scene, events: Events) => {
     // NOTE: on chrome it's possible to get the FileSystemFileHandle from the DataTransferItem
     // (which would result in more seamless user experience), but this is not yet supported in
     // other browsers.
-    events.function('doc.load', async (file: File, handle?: FileSystemFileHandle) => {
+    events.function('doc.load', async (file: Blob, handle?: FileSystemFileHandle, filename?: string) => {
         if (!events.invoke('scene.empty') && !await getResetConfirmation()) {
             return false;
         }
 
-        await loadDocument(file);
+        if (!await loadDocument(file)) {
+            return false;
+        }
 
-        events.fire('doc.setName', file.name);
+        events.fire('doc.setName', filename ?? handle?.name ?? (file instanceof File ? file.name : 'scene.ssproj'));
 
         if (handle) {
             documentFileHandle = handle;
-            recentFiles.add(handle);
+            await recentFiles.add(handle);
         }
+
+        return true;
     });
 
     events.function('doc.open', async () => {
@@ -235,7 +250,9 @@ const registerDocEvents = (scene: Scene, events: Events) => {
         if (fileSelector) {
             fileSelector.show(async (file?: File) => {
                 if (file) {
-                    await loadDocument(file);
+                    if (await loadDocument(file)) {
+                        events.fire('doc.setName', file.name);
+                    }
                 }
             });
         } else {
@@ -249,19 +266,23 @@ const registerDocEvents = (scene: Scene, events: Events) => {
                 if (fileHandles?.length === 1) {
                     const fileHandle = fileHandles[0];
 
-                    // null file handle incase loadDocument fails
-                    await loadDocument(await fileHandle.getFile());
+                    if (!await loadDocument(await fileHandle.getFile())) {
+                        return false;
+                    }
 
                     // store file handle for subsequent saves
                     documentFileHandle = fileHandle;
                     events.fire('doc.setName', fileHandle.name);
-                    recentFiles.add(fileHandle);
+                    await recentFiles.add(fileHandle);
+                    return true;
                 }
             } catch (error) {
                 if (error.name !== 'AbortError') {
                     console.error(error);
                 }
             }
+
+            return false;
         }
     });
 
@@ -277,12 +298,15 @@ const registerDocEvents = (scene: Scene, events: Events) => {
                 }
             }
 
-            await loadDocument(await fileHandle.getFile());
+            if (!await loadDocument(await fileHandle.getFile())) {
+                return false;
+            }
 
             // store file handle for subsequent saves
             documentFileHandle = fileHandle;
             events.fire('doc.setName', fileHandle.name);
-            recentFiles.add(fileHandle);
+            await recentFiles.add(fileHandle);
+            return true;
         } catch (error) {
             if (error.name !== 'AbortError') {
                 console.error(error);
@@ -293,6 +317,8 @@ const registerDocEvents = (scene: Scene, events: Events) => {
                 });
             }
         }
+
+        return false;
     });
 
     events.function('doc.save', async () => {
