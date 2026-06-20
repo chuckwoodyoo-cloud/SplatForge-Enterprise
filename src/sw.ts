@@ -41,7 +41,7 @@ self.addEventListener('install', (event) => {
     event.waitUntil(
         caches.open(cacheName)
         .then((cache) => {
-            cache.addAll(cacheUrls);
+            return cache.addAll(cacheUrls);
         })
     );
 });
@@ -59,13 +59,15 @@ self.addEventListener('activate', (event) => {
     }
 
     // delete the old caches once this one is activated
-    caches.keys().then((names) => {
-        for (const name of names) {
-            if (name !== cacheName) {
-                caches.delete(name);
-            }
-        }
-    });
+    event.waitUntil(
+        caches.keys()
+        .then(names => Promise.all(
+            names
+            .filter(name => name !== cacheName)
+            .map(name => caches.delete(name))
+        ))
+        .then(() => self.clients.claim())
+    );
 });
 
 self.addEventListener('fetch', (event) => {
