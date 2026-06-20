@@ -9,10 +9,84 @@ import { MappedReadFileSystem } from './io';
 import { Scene } from './scene';
 import { Splat } from './splat';
 import { serializePly } from './splat-serialize';
+import { State } from './splat-state';
 import { Transform } from './transform';
+
+type CloneTarget = Vec3 | {
+    position: Vec3,
+    splat?: Splat,
+    distance?: number
+};
+
+type PointSamples = {
+    x: number[],
+    y: number[],
+    z: number[]
+};
+
+const CLONE_SAMPLE_LIMIT = 80000;
+const CLONE_MIN_TARGET_NEIGHBORS = 8;
 
 const removeExtension = (filename: string) => {
     return filename.substring(0, filename.length - path.getExtension(filename).length);
+};
+
+const isCloneTargetInfo = (target: CloneTarget): target is Exclude<CloneTarget, Vec3> => {
+    return !!(target as Exclude<CloneTarget, Vec3>).position;
+};
+
+const createPointSamples = (): PointSamples => {
+    return {
+        x: [],
+        y: [],
+        z: []
+    };
+};
+
+const pushPointSample = (samples: PointSamples, point: Vec3) => {
+    samples.x.push(point.x);
+    samples.y.push(point.y);
+    samples.z.push(point.z);
+};
+
+const sampleCount = (samples: PointSamples) => {
+    return samples.x.length;
+};
+
+const percentile = (values: number[], q: number) => {
+    if (values.length === 0) {
+        return 0;
+    }
+
+    const sorted = [...values].sort((a, b) => a - b);
+    const pos = Math.max(0, Math.min(sorted.length - 1, (sorted.length - 1) * q));
+    const lo = Math.floor(pos);
+    const hi = Math.ceil(pos);
+    const t = pos - lo;
+    return sorted[lo] * (1 - t) + sorted[hi] * t;
+};
+
+const robustCenter = (samples: PointSamples) => {
+    return new Vec3(
+        percentile(samples.x, 0.5),
+        percentile(samples.y, 0.5),
+        percentile(samples.z, 0.5)
+    );
+};
+
+const sampleDistancePercentile = (samples: PointSamples, center: Vec3, q: number) => {
+    const distances: number[] = [];
+    for (let i = 0; i < samples.x.length; ++i) {
+        const dx = samples.x[i] - center.x;
+        const dy = samples.y[i] - center.y;
+        const dz = samples.z[i] - center.z;
+        distances.push(Math.sqrt(dx * dx + dy * dy + dz * dz));
+    }
+    return percentile(distances, q);
+};
+
+const clamp = (value: number, min: number, max: number) => {
+    return Math.max(min, Math.min(max, value));
 };
 
 // register for editor and scene events
@@ -46,6 +120,103 @@ const registerEditorEvents = (events: Events, editHistory: EditHistory, scene: S
         }
 
         return result;
+    };
+
+    const collectSourceCloneSamples = (splat: Splat) => {
+        const samples = createPointSamples();
+        const state = splat.splatData.getProp('state') as Uint8Array;
+        const stride = Math.max(1, Math.ceil(Math.max(1, splat.numSelected) / CLONE_SAMPLE_LIMIT));
+        let selectedSeen = 0;
+
+        for (let i = 0; i < state.length; ++i) {
+            if ((state[i] & State.selected) === 0 || (state[i] & State.deleted) !== 0) {
+                continue;
+            }
+
+            if (selectedSeen % stride === 0 && splat.calcSplatWorldPosition(i, vec)) {
+                pushPointSample(samples, vec);
+            }
+            selectedSeen++;
+        }
+
+        return samples;
+    };
+
+    const collectTargetSurfaceSamples = (splat: Splat, center: Vec3, radius: number) => {
+        const samples = createPointSamples();
+        const state = splat.splatData.getProp('state') as Uint8Array;
+        const stride = Math.max(1, Math.ceil(splat.splatData.numSplats / CLONE_SAMPLE_LIMIT));
+        const radiusSq = radius * radius;
+
+        for (let i = 0; i < state.length; i += stride) {
+            if ((state[i] & State.deleted) !== 0) {
+                continue;
+            }
+
+            if (splat.calcSplatWorldPosition(i, vec)) {
+                const dx = vec.x - center.x;
+                const dy = vec.y - center.y;
+                const dz = vec.z - center.z;
+                if (dx * dx + dy * dy + dz * dz <= radiusSq) {
+                    pushPointSample(samples, vec);
+                }
+            }
+        }
+
+        return samples;
+    };
+
+    const getCloneSourcePlacement = (splat: Splat) => {
+        const samples = collectSourceCloneSamples(splat);
+
+        if (sampleCount(samples) === 0) {
+            const anchor = splat.selectionBound.center.clone();
+            splat.worldTransform.transformPoint(anchor, anchor);
+            return {
+                anchor,
+                radius: Math.max(scene.bound.halfExtents.length() * 0.01, 0.01)
+            };
+        }
+
+        const anchor = robustCenter(samples);
+        const radius = Math.max(
+            sampleDistancePercentile(samples, anchor, 0.72),
+            scene.bound.halfExtents.length() * 0.006,
+            0.01
+        );
+
+        return { anchor, radius };
+    };
+
+    const getCloneTargetAnchor = (target: CloneTarget, sourceRadius: number) => {
+        const targetInfo = isCloneTargetInfo(target) ? target : null;
+        const hitPosition = (targetInfo ? targetInfo.position : target as Vec3).clone();
+
+        if (!targetInfo?.splat) {
+            return hitPosition;
+        }
+
+        let radius = Math.max(sourceRadius * 1.15, scene.bound.halfExtents.length() * 0.006, 0.01);
+        let targetSamples = collectTargetSurfaceSamples(targetInfo.splat, hitPosition, radius);
+
+        for (let i = 0; sampleCount(targetSamples) < CLONE_MIN_TARGET_NEIGHBORS && i < 2; ++i) {
+            radius *= 1.8;
+            targetSamples = collectTargetSurfaceSamples(targetInfo.splat, hitPosition, radius);
+        }
+
+        if (sampleCount(targetSamples) < CLONE_MIN_TARGET_NEIGHBORS) {
+            return hitPosition;
+        }
+
+        const surfaceCenter = robustCenter(targetSamples);
+        const maxYOffset = Math.max(sourceRadius, scene.bound.halfExtents.length() * 0.02, 0.02);
+        const targetAnchor = hitPosition.clone();
+
+        // Keep X/Z exactly where the user clicked for responsiveness, but snap
+        // height toward the local point-cloud surface so copied patches do not float.
+        targetAnchor.y += clamp(surfaceCenter.y - hitPosition.y, -maxYOffset, maxYOffset);
+
+        return targetAnchor;
     };
 
     let lastExportCursor = 0;
@@ -579,7 +750,7 @@ const registerEditorEvents = (events: Events, editHistory: EditHistory, scene: S
         });
     });
 
-    const performSelectionFunc = async (func: 'duplicate' | 'separate', targetPosition?: Vec3) => {
+    const performSelectionFunc = async (func: 'duplicate' | 'separate', target?: CloneTarget) => {
         await events.invoke('queue', (): void => undefined);
 
         const splats = selectedSplats();
@@ -587,11 +758,12 @@ const registerEditorEvents = (events: Events, editHistory: EditHistory, scene: S
             return false;
         }
 
-        let sourceCenter: Vec3 | undefined;
-        if (targetPosition) {
-            const sourceSplat = splats[0];
-            sourceCenter = sourceSplat.selectionBound.center.clone();
-            sourceSplat.worldTransform.transformPoint(sourceCenter, sourceCenter);
+        let sourceAnchor: Vec3 | undefined;
+        let targetAnchor: Vec3 | undefined;
+        if (target) {
+            const sourcePlacement = getCloneSourcePlacement(splats[0]);
+            sourceAnchor = sourcePlacement.anchor;
+            targetAnchor = getCloneTargetAnchor(target, sourcePlacement.radius);
         }
 
         const memFs = new MemoryFileSystem();
@@ -622,14 +794,14 @@ const registerEditorEvents = (events: Events, editHistory: EditHistory, scene: S
             } else {
                 const ops: EditOp[] = [new AddSplatOp(scene, copy)];
 
-                if (targetPosition && sourceCenter) {
+                if (targetAnchor && sourceAnchor) {
                     const oldt = new Transform(
                         copy.entity.getLocalPosition().clone(),
                         copy.entity.getLocalRotation().clone(),
                         copy.entity.getLocalScale().clone()
                     );
                     const newt = oldt.clone();
-                    newt.position.add(targetPosition.clone().sub(sourceCenter));
+                    newt.position.add(targetAnchor.clone().sub(sourceAnchor));
                     ops.push(new EntityTransformOp({
                         splat: copy,
                         oldt,
@@ -651,8 +823,8 @@ const registerEditorEvents = (events: Events, editHistory: EditHistory, scene: S
         await performSelectionFunc('duplicate');
     });
 
-    events.function('select.cloneToTarget', async (targetPosition: Vec3) => {
-        return await performSelectionFunc('duplicate', targetPosition);
+    events.function('select.cloneToTarget', async (target: CloneTarget) => {
+        return await performSelectionFunc('duplicate', target);
     });
 
     events.on('select.separate', async () => {

@@ -99,7 +99,7 @@ class CloneSelection {
                     );
 
                     if (result) {
-                        await events.invoke('select.cloneToTarget', result.position);
+                        await events.invoke('select.cloneToTarget', result);
                         events.fire('tool.deactivate');
                     }
                 }
