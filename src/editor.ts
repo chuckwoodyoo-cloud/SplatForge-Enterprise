@@ -1126,7 +1126,10 @@ const registerEditorEvents = (events: Events, editHistory: EditHistory, scene: S
             showBound: events.invoke('camera.bound'),
             showBoundDimensions: events.invoke('camera.boundDimensions'),
             showCameraPoses: events.invoke('camera.showPoses'),
-            flySpeed: events.invoke('camera.flySpeed')
+            flySpeed: events.invoke('camera.flySpeed'),
+            environment: events.invoke('environment.settings'),
+            weather: events.invoke('weather.settings'),
+            proxyMeshes: events.invoke('proxyMesh.serialize')
         };
     });
 
@@ -1143,6 +1146,15 @@ const registerEditorEvents = (events: Events, editHistory: EditHistory, scene: S
         events.fire('camera.setBoundDimensions', docView.showBoundDimensions ?? false);
         events.fire('camera.setShowPoses', docView.showCameraPoses ?? false);
         events.fire('camera.setFlySpeed', docView.flySpeed);
+        if (docView.environment) {
+            events.fire('environment.setSettings', docView.environment);
+        }
+        if (docView.weather) {
+            events.fire('weather.setSettings', docView.weather);
+        }
+        if (docView.proxyMeshes) {
+            events.fire('proxyMesh.import', docView.proxyMeshes);
+        }
     });
 };
 

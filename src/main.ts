@@ -6,10 +6,12 @@ import { CommandQueue } from './command-queue';
 import { registerDocEvents } from './doc';
 import { EditHistory } from './edit-history';
 import { registerEditorEvents } from './editor';
+import { registerEnvironmentEvents } from './environment';
 import { Events } from './events';
 import { initFileHandler } from './file-handler';
 import { registerIframeApi } from './iframe-api';
 import { registerPlySequenceEvents } from './ply-sequence';
+import { registerProxyMeshEvents } from './proxy-mesh-system';
 import { registerPublishEvents } from './publish';
 import { registerRenderEvents } from './render';
 import { Scene } from './scene';
@@ -37,6 +39,7 @@ import { registerTransformHandlerEvents } from './transform-handler';
 import { BoundDimensionsOverlay } from './ui/bound-dimensions-overlay';
 import { EditorUI } from './ui/editor';
 import { localizeInit } from './ui/localization';
+import { registerWeatherEvents } from './weather-system';
 
 declare global {
     interface LaunchParams {
@@ -217,6 +220,9 @@ const main = async () => {
     setSelectedClr(toColor(sceneConfig.selectedClr));
     setUnselectedClr(toColor(sceneConfig.unselectedClr));
     setLockedClr(toColor(sceneConfig.lockedClr));
+    registerEnvironmentEvents(events, scene);
+    registerWeatherEvents(events, scene);
+    registerProxyMeshEvents(events, scene);
 
     // create the mask selection canvas
     const maskCanvas = document.createElement('canvas');
