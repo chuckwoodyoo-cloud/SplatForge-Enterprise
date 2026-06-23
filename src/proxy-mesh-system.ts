@@ -2,6 +2,7 @@ import { BLEND_NONE, BLEND_NORMAL, Color, Entity, StandardMaterial, Vec3 } from 
 
 import { Events } from './events';
 import { Scene } from './scene';
+import type { WeatherMode } from './weather-system';
 
 type Vec3Tuple = [number, number, number];
 type Vec3Like = Vec3 | Vec3Tuple | { x: number, y: number, z: number };
@@ -47,10 +48,52 @@ type ProxyRaycastHit = {
     entity: Entity
 };
 
+type ProxyCollisionOptions = {
+    radius?: number,
+    navigation?: boolean,
+    silent?: boolean
+};
+
+type ProxyCollisionHit = {
+    id: string,
+    kind: ProxyMeshKind,
+    normal: Vec3,
+    penetration: number
+};
+
+type ProxyCollisionResult = {
+    position: Vec3,
+    grounded: boolean,
+    moved: boolean,
+    hits: ProxyCollisionHit[]
+};
+
+type PatrolRouteDescriptor = {
+    id?: string,
+    points?: Vec3Like[],
+    speed?: number,
+    loop?: boolean,
+    weather?: WeatherMode[]
+};
+
+type PatrolRouteRecord = {
+    id: string,
+    points: Vec3[],
+    speed: number,
+    loop: boolean,
+    weather: WeatherMode[] | null,
+    index: number,
+    position: Vec3,
+    active: boolean,
+    weatherPaused: boolean
+};
+
 const defaultBoxSize = new Vec3(4, 1, 4);
 const defaultPlaneSize = new Vec3(60, 0.02, 60);
 const up = new Vec3(0, 1, 0);
 const down = new Vec3(0, -1, 0);
+const patrolRouteColor = new Color(0.18, 0.88, 1, 0.7);
+const patrolAgentColor = new Color(1, 0.84, 0.26, 0.95);
 
 const toVec3 = (value: Vec3Like | undefined, fallback: Vec3) => {
     if (!value) {
@@ -79,6 +122,9 @@ class ProxyMeshSystem {
     private material: StandardMaterial;
     private debugMaterial: StandardMaterial;
     private records = new Map<string, ProxyMeshRecord>();
+    private patrolRoutes = new Map<string, PatrolRouteRecord>();
+    private patrolEnabled = false;
+    private currentWeatherMode: WeatherMode = 'clear';
 
     constructor(events: Events, scene: Scene) {
         this.events = events;
@@ -141,6 +187,25 @@ class ProxyMeshSystem {
             )[0] ?? null;
         });
 
+        this.events.function('proxyMesh.resolveCollision', (
+            position: Vec3Like,
+            radiusOrOptions: number | ProxyCollisionOptions = 0.35,
+            options: ProxyCollisionOptions = {}
+        ) => {
+            const collisionOptions = typeof radiusOrOptions === 'number' ?
+                { ...options, radius: radiusOrOptions } :
+                radiusOrOptions;
+            return this.serializeCollision(this.resolveCollision(position, collisionOptions));
+        });
+
+        this.events.function('proxyMesh.createPatrolRoute', (descriptor: PatrolRouteDescriptor = {}) => {
+            return this.createPatrolRoute(descriptor);
+        });
+
+        this.events.function('proxyMesh.listPatrolRoutes', () => this.serializePatrolRoutes());
+        this.events.function('proxyMesh.patrolState', () => this.serializePatrolRoutes());
+        this.events.function('proxyMesh.setPatrolEnabled', (enabled: boolean) => this.setPatrolEnabled(enabled));
+
         this.events.on('proxyMesh.import', (descriptors: ProxyMeshDescriptor[] = []) => {
             this.import(descriptors);
         });
@@ -151,6 +216,38 @@ class ProxyMeshSystem {
 
         this.events.on('proxyMesh.clear', () => {
             this.clear();
+        });
+
+        this.events.on('proxyMesh.removePatrolRoute', (id: string) => {
+            this.removePatrolRoute(id);
+        });
+
+        this.events.on('proxyMesh.clearPatrolRoutes', () => {
+            this.clearPatrolRoutes();
+        });
+
+        this.events.on('proxyMesh.setPatrolEnabled', (enabled: boolean) => {
+            this.setPatrolEnabled(enabled);
+        });
+
+        this.events.on('weather.changed', (state: { resolvedMode?: WeatherMode }) => {
+            if (state.resolvedMode) {
+                this.currentWeatherMode = state.resolvedMode;
+            }
+        });
+
+        this.events.on('weather.trigger', (event: { type?: string, mode?: WeatherMode }) => {
+            if (event.type === 'weather-enter' && event.mode) {
+                this.currentWeatherMode = event.mode;
+                this.events.fire('proxyMesh.weatherTrigger', {
+                    mode: event.mode,
+                    patrol: this.serializePatrolRoutes()
+                });
+            }
+        });
+
+        this.events.on('update', (deltaTime: number) => {
+            this.updatePatrol(deltaTime);
         });
     }
 
@@ -269,6 +366,287 @@ class ProxyMeshSystem {
         return options.first ? hits.slice(0, 1) : hits;
     }
 
+    private resolveCollision(positionLike: Vec3Like, options: ProxyCollisionOptions = {}): ProxyCollisionResult {
+        const radius = Math.max(0.01, options.radius ?? 0.35);
+        const position = toVec3(positionLike, new Vec3());
+        const original = position.clone();
+        const hits: ProxyCollisionHit[] = [];
+        let grounded = false;
+
+        this.records.forEach((record) => {
+            if (!record.raycast) {
+                return;
+            }
+
+            if (record.kind === 'plane') {
+                if (options.navigation === false || !record.navigation) {
+                    return;
+                }
+
+                const halfX = record.size.x * 0.5;
+                const halfZ = record.size.z * 0.5;
+                const insideX = position.x >= record.position.x - halfX && position.x <= record.position.x + halfX;
+                const insideZ = position.z >= record.position.z - halfZ && position.z <= record.position.z + halfZ;
+                const bottom = position.y - radius;
+
+                if (insideX && insideZ && bottom <= record.position.y && position.y >= record.position.y - 3) {
+                    const penetration = record.position.y - bottom;
+                    position.y += penetration;
+                    grounded = true;
+                    hits.push({
+                        id: record.id,
+                        kind: record.kind,
+                        normal: up.clone(),
+                        penetration
+                    });
+                }
+                return;
+            }
+
+            const half = record.size.clone().mulScalar(0.5);
+            const min = record.position.clone().sub(half).sub(new Vec3(radius, radius, radius));
+            const max = record.position.clone().add(half).add(new Vec3(radius, radius, radius));
+            const inside = position.x >= min.x && position.x <= max.x &&
+                position.y >= min.y && position.y <= max.y &&
+                position.z >= min.z && position.z <= max.z;
+
+            if (!inside) {
+                return;
+            }
+
+            const pushes = [
+                { axis: 'x', sign: -1, amount: position.x - min.x },
+                { axis: 'x', sign: 1, amount: max.x - position.x },
+                { axis: 'y', sign: -1, amount: position.y - min.y },
+                { axis: 'y', sign: 1, amount: max.y - position.y },
+                { axis: 'z', sign: -1, amount: position.z - min.z },
+                { axis: 'z', sign: 1, amount: max.z - position.z }
+            ].sort((a, b) => a.amount - b.amount);
+
+            const push = pushes[0];
+            const normal = new Vec3();
+            if (push.axis === 'x') {
+                position.x += push.amount * push.sign;
+                normal.x = push.sign;
+            } else if (push.axis === 'y') {
+                position.y += push.amount * push.sign;
+                normal.y = push.sign;
+                grounded = push.sign > 0;
+            } else {
+                position.z += push.amount * push.sign;
+                normal.z = push.sign;
+            }
+
+            hits.push({
+                id: record.id,
+                kind: record.kind,
+                normal,
+                penetration: push.amount
+            });
+        });
+
+        const result = {
+            position,
+            grounded,
+            moved: position.distance(original) > 0.0001,
+            hits
+        };
+
+        if (result.moved && !options.silent) {
+            this.events.fire('proxyMesh.collision', this.serializeCollision(result));
+        }
+
+        return result;
+    }
+
+    private serializeCollision(result: ProxyCollisionResult) {
+        return {
+            position: toTuple(result.position),
+            grounded: result.grounded,
+            moved: result.moved,
+            hits: result.hits.map(hit => ({
+                id: hit.id,
+                kind: hit.kind,
+                normal: toTuple(hit.normal),
+                penetration: hit.penetration
+            }))
+        };
+    }
+
+    private createPatrolRoute(descriptor: PatrolRouteDescriptor) {
+        const points = (descriptor.points ?? []).map(point => toVec3(point, new Vec3()));
+        if (points.length < 2) {
+            return null;
+        }
+
+        const id = descriptor.id ?? `patrol-${Math.random().toString(36).slice(2, 9)}`;
+        const route: PatrolRouteRecord = {
+            id,
+            points,
+            speed: Math.max(0.05, descriptor.speed ?? 1.5),
+            loop: descriptor.loop ?? true,
+            weather: descriptor.weather?.length ? [...descriptor.weather] : null,
+            index: 1,
+            position: points[0].clone(),
+            active: true,
+            weatherPaused: false
+        };
+
+        this.patrolRoutes.set(id, route);
+        this.scene.forceRender = true;
+        this.events.fire('proxyMesh.patrolChanged', this.serializePatrolRoutes());
+        return this.serializePatrolRoute(route);
+    }
+
+    private removePatrolRoute(id: string) {
+        if (!this.patrolRoutes.delete(id)) {
+            return;
+        }
+
+        this.scene.forceRender = true;
+        this.events.fire('proxyMesh.patrolChanged', this.serializePatrolRoutes());
+    }
+
+    private clearPatrolRoutes() {
+        if (this.patrolRoutes.size === 0) {
+            return;
+        }
+
+        this.patrolRoutes.clear();
+        this.scene.forceRender = true;
+        this.events.fire('proxyMesh.patrolChanged', this.serializePatrolRoutes());
+    }
+
+    private setPatrolEnabled(enabled: boolean) {
+        this.patrolEnabled = enabled;
+        this.scene.forceRender = true;
+        this.events.fire('proxyMesh.patrolEnabled', enabled);
+        return enabled;
+    }
+
+    private serializePatrolRoute(route: PatrolRouteRecord) {
+        return {
+            id: route.id,
+            points: route.points.map(point => toTuple(point)),
+            speed: route.speed,
+            loop: route.loop,
+            weather: route.weather ? [...route.weather] : null,
+            index: route.index,
+            position: toTuple(route.position),
+            active: route.active,
+            weatherPaused: route.weatherPaused
+        };
+    }
+
+    private serializePatrolRoutes() {
+        return {
+            enabled: this.patrolEnabled,
+            weatherMode: this.currentWeatherMode,
+            routes: Array.from(this.patrolRoutes.values()).map(route => this.serializePatrolRoute(route))
+        };
+    }
+
+    private updatePatrol(deltaTime: number) {
+        if (!this.patrolEnabled || this.patrolRoutes.size === 0) {
+            return;
+        }
+
+        this.patrolRoutes.forEach((route) => {
+            route.weatherPaused = !!route.weather && !route.weather.includes(this.currentWeatherMode);
+
+            if (route.active && !route.weatherPaused) {
+                this.advancePatrolRoute(route, deltaTime);
+            }
+
+            this.drawPatrolRoute(route);
+        });
+
+        this.scene.forceRender = true;
+    }
+
+    private advancePatrolRoute(route: PatrolRouteRecord, deltaTime: number) {
+        let remaining = route.speed * deltaTime;
+
+        while (remaining > 0 && route.active) {
+            const target = route.points[route.index];
+            const distance = route.position.distance(target);
+
+            if (distance <= 0.001) {
+                this.advancePatrolIndex(route);
+                continue;
+            }
+
+            const step = Math.min(remaining, distance);
+            const direction = target.clone().sub(route.position).normalize();
+            route.position.add(direction.mulScalar(step));
+            remaining -= step;
+
+            if (step >= distance - 0.001) {
+                this.advancePatrolIndex(route);
+            }
+        }
+
+        const collision = this.resolveCollision(route.position, {
+            radius: 0.35,
+            silent: true
+        });
+        route.position.copy(collision.position);
+    }
+
+    private advancePatrolIndex(route: PatrolRouteRecord) {
+        const previousIndex = route.index;
+        route.index += 1;
+
+        if (route.index >= route.points.length) {
+            if (route.loop) {
+                route.index = 0;
+            } else {
+                route.index = route.points.length - 1;
+                route.active = false;
+            }
+        }
+
+        if (previousIndex !== route.index) {
+            this.events.fire('proxyMesh.patrolWaypoint', this.serializePatrolRoute(route));
+        }
+    }
+
+    private drawPatrolRoute(route: PatrolRouteRecord) {
+        if (route.points.length < 2) {
+            return;
+        }
+
+        const positions: number[] = [];
+        for (let i = 0; i < route.points.length - 1; i++) {
+            this.pushLine(positions, route.points[i], route.points[i + 1]);
+        }
+        if (route.loop) {
+            this.pushLine(positions, route.points[route.points.length - 1], route.points[0]);
+        }
+
+        this.scene.app.drawLineArrays(positions, patrolRouteColor, false, this.scene.gizmoLayer);
+
+        const markerSize = route.weatherPaused ? 0.26 : 0.42;
+        const marker: number[] = [];
+        this.pushLine(marker,
+            route.position.clone().add(new Vec3(-markerSize, 0, 0)),
+            route.position.clone().add(new Vec3(markerSize, 0, 0))
+        );
+        this.pushLine(marker,
+            route.position.clone().add(new Vec3(0, -markerSize, 0)),
+            route.position.clone().add(new Vec3(0, markerSize, 0))
+        );
+        this.pushLine(marker,
+            route.position.clone().add(new Vec3(0, 0, -markerSize)),
+            route.position.clone().add(new Vec3(0, 0, markerSize))
+        );
+        this.scene.app.drawLineArrays(marker, patrolAgentColor, false, this.scene.gizmoLayer);
+    }
+
+    private pushLine(positions: number[], start: Vec3, end: Vec3) {
+        positions.push(start.x, start.y, start.z, end.x, end.y, end.z);
+    }
+
     private raycastPlane(record: ProxyMeshRecord, start: Vec3, end: Vec3): ProxyRaycastHit | null {
         const dy = end.y - start.y;
         if (Math.abs(dy) < 0.00001) {
@@ -372,4 +750,10 @@ const registerProxyMeshEvents = (events: Events, scene: Scene) => {
 };
 
 export { registerProxyMeshEvents };
-export type { ProxyMeshDescriptor, ProxyRaycastHit, ProxyRaycastOptions };
+export type {
+    PatrolRouteDescriptor,
+    ProxyCollisionOptions,
+    ProxyMeshDescriptor,
+    ProxyRaycastHit,
+    ProxyRaycastOptions
+};

@@ -1,4 +1,4 @@
-import { Container, Label, SelectInput, SliderInput } from '@playcanvas/pcui';
+import { BooleanInput, Container, Label, SelectInput, SliderInput } from '@playcanvas/pcui';
 
 import { EnvironmentSettings } from '../environment';
 import { Events } from '../events';
@@ -120,7 +120,8 @@ class EnvironmentPanel extends Container {
                 { v: 'snow', t: localize('panel.environment.weather.snow') },
                 { v: 'fog', t: localize('panel.environment.weather.fog') },
                 { v: 'cloudy', t: localize('panel.environment.weather.cloudy') },
-                { v: 'storm', t: localize('panel.environment.weather.storm') }
+                { v: 'storm', t: localize('panel.environment.weather.storm') },
+                { v: 'timeline', t: localize('panel.environment.weather.timeline') }
             ]
         });
 
@@ -147,12 +148,52 @@ class EnvironmentPanel extends Container {
         weatherIntensityRow.append(weatherIntensityLabel);
         weatherIntensityRow.append(weatherIntensitySlider);
 
+        const weatherTimeRow = new Container({
+            class: 'environment-panel-row'
+        });
+
+        const weatherTimeLabel = new Label({
+            text: localize('panel.environment.weatherTime'),
+            class: 'environment-panel-row-label'
+        });
+
+        const weatherTimeSlider = new SliderInput({
+            class: 'environment-panel-row-slider',
+            min: 0,
+            max: 24,
+            precision: 1,
+            value: 12
+        });
+
+        weatherTimeRow.append(weatherTimeLabel);
+        weatherTimeRow.append(weatherTimeSlider);
+
+        const weatherTimelineRow = new Container({
+            class: 'environment-panel-row'
+        });
+
+        const weatherTimelineLabel = new Label({
+            text: localize('panel.environment.weatherTimelinePlaying'),
+            class: 'environment-panel-row-label'
+        });
+
+        const weatherTimelineToggle = new BooleanInput({
+            type: 'toggle',
+            class: 'environment-panel-row-toggle',
+            value: false
+        });
+
+        weatherTimelineRow.append(weatherTimelineLabel);
+        weatherTimelineRow.append(weatherTimelineToggle);
+
         this.append(header);
         this.append(presetRow);
         this.append(exposureRow);
         this.append(fogRow);
         this.append(weatherRow);
         this.append(weatherIntensityRow);
+        this.append(weatherTimeRow);
+        this.append(weatherTimelineRow);
 
         const setVisible = (visible: boolean) => {
             if (visible === this.hidden) {
@@ -203,6 +244,14 @@ class EnvironmentPanel extends Container {
             events.fire('weather.setIntensity', value);
         });
 
+        weatherTimeSlider.on('change', (value: number) => {
+            events.fire('weather.setTimelineTime', value);
+        });
+
+        weatherTimelineToggle.on('change', (value: boolean) => {
+            events.fire('weather.setTimelinePlaying', value);
+        });
+
         events.on('environment.settings', (settings: EnvironmentSettings) => {
             presetSelect.value = settings.preset;
             exposureSlider.value = settings.exposure;
@@ -212,6 +261,13 @@ class EnvironmentPanel extends Container {
         events.on('weather.settings', (settings: WeatherSettings) => {
             weatherSelect.value = settings.mode;
             weatherIntensitySlider.value = settings.intensity;
+            weatherTimeSlider.value = settings.timelineTime;
+            weatherTimelineToggle.value = settings.timelinePlaying;
+        });
+
+        events.on('weather.timeline', (settings: { time: number, playing: boolean }) => {
+            weatherTimeSlider.value = settings.time;
+            weatherTimelineToggle.value = settings.playing;
         });
 
         tooltips.register(presetSelect, localize('panel.environment.preset'), 'left');
@@ -219,6 +275,8 @@ class EnvironmentPanel extends Container {
         tooltips.register(fogSlider, localize('panel.environment.fog'), 'left');
         tooltips.register(weatherSelect, localize('panel.environment.weather'), 'left');
         tooltips.register(weatherIntensitySlider, localize('panel.environment.weatherIntensity'), 'left');
+        tooltips.register(weatherTimeSlider, localize('panel.environment.weatherTime'), 'left');
+        tooltips.register(weatherTimelineToggle, localize('panel.environment.weatherTimelinePlaying'), 'left');
     }
 }
 
