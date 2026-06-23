@@ -1,14 +1,4 @@
-import {
-    BLEND_NORMAL,
-    Color,
-    Curve,
-    CurveSet,
-    EMITTERSHAPE_BOX,
-    Entity,
-    PARTICLEMODE_GPU,
-    PARTICLEORIENTATION_WORLD,
-    Vec3
-} from 'playcanvas';
+import { Color, Entity, Vec3 } from 'playcanvas';
 
 import { Events } from './events';
 import { Scene } from './scene';
@@ -28,7 +18,28 @@ type FogSnapshot = {
     end: number
 };
 
+type WeatherParticle = {
+    x: number,
+    y: number,
+    z: number,
+    speed: number,
+    length: number,
+    drift: number,
+    size: number,
+    phase: number
+};
+
+type WeatherRenderStats = {
+    mode: WeatherMode,
+    intensity: number,
+    rainSegments: number,
+    snowSegments: number
+};
+
 const cameraPosition = new Vec3();
+const rainColor = new Color(0.62, 0.78, 1, 0.72);
+const snowColor = new Color(0.96, 0.99, 1, 0.9);
+const rainWind = new Vec3(-0.58, -1, 0.14).normalize();
 
 const WEATHER_DEFAULTS: WeatherSettings = {
     mode: 'clear',
@@ -42,15 +53,28 @@ const cloneSettings = (settings: WeatherSettings): WeatherSettings => ({
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
+const randomRange = (min: number, max: number) => min + Math.random() * (max - min);
+
 class WeatherSystem {
     private events: Events;
     private scene: Scene;
     private root: Entity;
-    private rain: Entity | null = null;
-    private snow: Entity | null = null;
     private lightning: Entity;
+    private overlay: HTMLCanvasElement;
+    private overlayContext: CanvasRenderingContext2D | null;
+    private overlayScale = 1;
     private baseFog: FogSnapshot;
     private settings = cloneSettings(WEATHER_DEFAULTS);
+    private rain = this.createParticles(420, 'rain');
+    private snow = this.createParticles(260, 'snow');
+    private rainLinePositions: number[] = [];
+    private snowLinePositions: number[] = [];
+    private renderStats: WeatherRenderStats = {
+        mode: 'clear',
+        intensity: 0.6,
+        rainSegments: 0,
+        snowSegments: 0
+    };
     private lightningDelay = 1.5;
     private lightningPulse = 0;
 
@@ -59,6 +83,11 @@ class WeatherSystem {
         this.scene = scene;
         this.root = new Entity('WeatherSystem');
         this.scene.app.root.addChild(this.root);
+        this.overlay = document.createElement('canvas');
+        this.overlay.id = 'weather-canvas';
+        this.overlay.hidden = true;
+        this.overlayContext = this.overlay.getContext('2d');
+        document.getElementById('canvas-container')?.appendChild(this.overlay);
 
         this.baseFog = this.readFog();
         this.lightning = new Entity('WeatherLightning');
@@ -71,13 +100,6 @@ class WeatherSystem {
         this.lightning.setLocalEulerAngles(55, -30, 0);
         this.root.addChild(this.lightning);
 
-        if (this.scene.app.systems.particlesystem) {
-            this.rain = this.createRain();
-            this.snow = this.createSnow();
-            this.root.addChild(this.rain);
-            this.root.addChild(this.snow);
-        }
-
         this.apply();
         this.registerEvents();
     }
@@ -85,6 +107,7 @@ class WeatherSystem {
     private registerEvents() {
         this.events.function('weather.settings', () => cloneSettings(this.settings));
         this.events.function('weather.mode', () => this.settings.mode);
+        this.events.function('weather.renderStats', () => ({ ...this.renderStats }));
 
         this.events.on('weather.setMode', (mode: WeatherMode) => {
             this.setSettings({ mode });
@@ -123,80 +146,39 @@ class WeatherSystem {
         this.apply();
     }
 
-    private createRain() {
-        const entity = new Entity('Rain');
-        entity.addComponent('particlesystem', {
-            autoPlay: false,
-            loop: true,
-            preWarm: true,
-            numParticles: 700,
-            lifetime: 1.7,
-            rate: 0.005,
-            rate2: 0.018,
-            emitterShape: EMITTERSHAPE_BOX,
-            emitterExtents: new Vec3(22, 5, 22),
-            localSpace: false,
-            wrap: true,
-            wrapBounds: new Vec3(22, 10, 22),
-            mode: PARTICLEMODE_GPU,
-            lighting: false,
-            stretch: 0.72,
-            alignToMotion: true,
-            depthWrite: false,
-            blendType: BLEND_NORMAL,
-            orientation: PARTICLEORIENTATION_WORLD,
-            scaleGraph: new Curve([0, 0.09, 1, 0.09]),
-            alphaGraph: new Curve([0, 0, 0.12, 0.65, 0.88, 0.55, 1, 0]),
-            colorGraph: new CurveSet([
-                [0, 0.66, 1, 0.66],
-                [0, 0.78, 1, 0.78],
-                [0, 0.92, 1, 0.92]
-            ]),
-            velocityGraph: new CurveSet([
-                [0, -1.1, 1, -1.1],
-                [0, -14, 1, -14],
-                [0, 0.45, 1, 0.45]
-            ])
-        });
-        entity.enabled = false;
-        return entity;
+    private createParticles(count: number, kind: 'rain' | 'snow') {
+        return Array.from({ length: count }, () => this.resetParticle({
+            x: 0,
+            y: 0,
+            z: 0,
+            speed: 0,
+            length: 0,
+            drift: 0,
+            size: 0,
+            phase: Math.random() * Math.PI * 2
+        }, kind));
     }
 
-    private createSnow() {
-        const entity = new Entity('Snow');
-        entity.addComponent('particlesystem', {
-            autoPlay: false,
-            loop: true,
-            preWarm: true,
-            numParticles: 420,
-            lifetime: 4.2,
-            rate: 0.018,
-            rate2: 0.05,
-            emitterShape: EMITTERSHAPE_BOX,
-            emitterExtents: new Vec3(24, 5, 24),
-            localSpace: false,
-            wrap: true,
-            wrapBounds: new Vec3(24, 10, 24),
-            mode: PARTICLEMODE_GPU,
-            lighting: false,
-            depthWrite: false,
-            blendType: BLEND_NORMAL,
-            orientation: PARTICLEORIENTATION_WORLD,
-            scaleGraph: new Curve([0, 0.13, 1, 0.08]),
-            alphaGraph: new Curve([0, 0, 0.15, 0.75, 0.82, 0.65, 1, 0]),
-            colorGraph: new CurveSet([
-                [0, 0.94, 1, 0.94],
-                [0, 0.97, 1, 0.97],
-                [0, 1, 1, 1]
-            ]),
-            velocityGraph: new CurveSet([
-                [0, -0.35, 1, 0.25],
-                [0, -2.1, 1, -1.4],
-                [0, 0.15, 1, -0.35]
-            ])
-        });
-        entity.enabled = false;
-        return entity;
+    private resetParticle(particle: WeatherParticle, kind: 'rain' | 'snow') {
+        const radius = kind === 'rain' ? 17 : 19;
+        particle.x = randomRange(-radius, radius);
+        particle.y = randomRange(-5, 10);
+        particle.z = randomRange(4, 34);
+        particle.phase = randomRange(0, Math.PI * 2);
+
+        if (kind === 'rain') {
+            particle.speed = randomRange(16, 25);
+            particle.length = randomRange(1.4, 2.4);
+            particle.drift = randomRange(-0.35, 0.35);
+            particle.size = 0;
+        } else {
+            particle.speed = randomRange(1.4, 3.2);
+            particle.length = 0;
+            particle.drift = randomRange(-0.85, 0.85);
+            particle.size = randomRange(0.08, 0.18);
+        }
+
+        return particle;
     }
 
     private readFog(): FogSnapshot {
@@ -256,35 +238,6 @@ class WeatherSystem {
     }
 
     private apply() {
-        const mode = this.settings.mode;
-        const intensity = this.settings.intensity;
-        const showRain = mode === 'rain' || mode === 'storm';
-        const showSnow = mode === 'snow';
-
-        if (this.rain) {
-            this.rain.enabled = showRain;
-            this.rain.particlesystem.numParticles = Math.round(320 + intensity * 900);
-            this.rain.particlesystem.intensity = 0.55 + intensity * 0.9;
-            if (showRain) {
-                this.rain.particlesystem.reset();
-                this.rain.particlesystem.play();
-            } else {
-                this.rain.particlesystem.stop();
-            }
-        }
-
-        if (this.snow) {
-            this.snow.enabled = showSnow;
-            this.snow.particlesystem.numParticles = Math.round(180 + intensity * 520);
-            this.snow.particlesystem.intensity = 0.6 + intensity * 0.6;
-            if (showSnow) {
-                this.snow.particlesystem.reset();
-                this.snow.particlesystem.play();
-            } else {
-                this.snow.particlesystem.stop();
-            }
-        }
-
         if (this.usesWeatherFog()) {
             this.writeFog(this.weatherFog());
         } else {
@@ -292,18 +245,235 @@ class WeatherSystem {
         }
 
         this.lightning.light.intensity = 0;
+        this.renderStats = {
+            mode: this.settings.mode,
+            intensity: this.settings.intensity,
+            rainSegments: 0,
+            snowSegments: 0
+        };
         this.scene.forceRender = true;
         this.events.fire('weather.settings', cloneSettings(this.settings));
     }
 
     private update(deltaTime: number) {
-        const activeParticles = this.rain?.enabled || this.snow?.enabled;
-        if (activeParticles) {
+        const mode = this.settings.mode;
+        const intensity = this.settings.intensity;
+        const showRain = mode === 'rain' || mode === 'storm';
+        const showSnow = mode === 'snow';
+
+        this.prepareOverlay(showRain || showSnow);
+
+        if (showRain || showSnow) {
             cameraPosition.copy(this.scene.camera.position);
-            this.root.setLocalPosition(cameraPosition.x, cameraPosition.y + 8, cameraPosition.z);
+            this.root.setLocalPosition(cameraPosition);
+        }
+
+        let rainSegments = 0;
+        let snowSegments = 0;
+
+        if (showRain) {
+            rainSegments = this.drawRain(deltaTime, intensity);
+        }
+
+        if (showSnow) {
+            snowSegments = this.drawSnow(deltaTime, intensity);
+        }
+
+        this.renderStats = {
+            mode,
+            intensity,
+            rainSegments,
+            snowSegments
+        };
+
+        if (showRain || showSnow) {
             this.scene.forceRender = true;
         }
 
+        this.updateLightning(deltaTime);
+    }
+
+    private prepareOverlay(active: boolean) {
+        const ctx = this.overlayContext;
+        if (!ctx) {
+            return;
+        }
+
+        if (!active) {
+            if (!this.overlay.hidden) {
+                ctx.clearRect(0, 0, this.overlay.width, this.overlay.height);
+                this.overlay.hidden = true;
+            }
+            return;
+        }
+
+        this.overlay.hidden = false;
+        const rect = this.overlay.getBoundingClientRect();
+        this.overlayScale = Math.min(window.devicePixelRatio || 1, 2);
+        const width = Math.max(1, Math.ceil(rect.width * this.overlayScale));
+        const height = Math.max(1, Math.ceil(rect.height * this.overlayScale));
+
+        if (this.overlay.width !== width || this.overlay.height !== height) {
+            this.overlay.width = width;
+            this.overlay.height = height;
+        }
+
+        ctx.clearRect(0, 0, this.overlay.width, this.overlay.height);
+    }
+
+    private particleToWorld(particle: WeatherParticle, out: number[], index: number) {
+        const camera = this.scene.camera.mainCamera;
+        const right = camera.right;
+        const up = camera.up;
+        const forward = camera.forward;
+        const origin = this.scene.camera.position;
+
+        out[index] = origin.x + right.x * particle.x + up.x * particle.y + forward.x * particle.z;
+        out[index + 1] = origin.y + right.y * particle.x + up.y * particle.y + forward.y * particle.z;
+        out[index + 2] = origin.z + right.z * particle.x + up.z * particle.y + forward.z * particle.z;
+    }
+
+    private drawRain(deltaTime: number, intensity: number) {
+        const count = Math.min(this.rain.length, Math.round(90 + intensity * this.rain.length));
+        const positions = this.rainLinePositions;
+        positions.length = count * 6;
+
+        for (let i = 0; i < count; i++) {
+            const particle = this.rain[i];
+            particle.y -= particle.speed * deltaTime;
+            particle.x += (particle.drift - 0.65) * deltaTime;
+
+            if (particle.y < -8 || particle.x < -20 || particle.x > 20) {
+                this.resetParticle(particle, 'rain');
+                particle.y = randomRange(7, 13);
+            }
+
+            const index = i * 6;
+            this.particleToWorld(particle, positions, index);
+            positions[index + 3] = positions[index] + rainWind.x * particle.length;
+            positions[index + 4] = positions[index + 1] + rainWind.y * particle.length;
+            positions[index + 5] = positions[index + 2] + rainWind.z * particle.length;
+        }
+
+        this.scene.app.drawLineArrays(positions, rainColor, false, this.scene.gizmoLayer);
+        this.drawRainOverlay(count);
+        return count;
+    }
+
+    private drawSnow(deltaTime: number, intensity: number) {
+        const count = Math.min(this.snow.length, Math.round(60 + intensity * this.snow.length));
+        const positions = this.snowLinePositions;
+        positions.length = count * 12;
+
+        const camera = this.scene.camera.mainCamera;
+        const right = camera.right;
+        const up = camera.up;
+
+        for (let i = 0; i < count; i++) {
+            const particle = this.snow[i];
+            particle.phase += deltaTime * 1.6;
+            particle.y -= particle.speed * deltaTime;
+            particle.x += (Math.sin(particle.phase) * 0.55 + particle.drift) * deltaTime;
+
+            if (particle.y < -7 || particle.x < -21 || particle.x > 21) {
+                this.resetParticle(particle, 'snow');
+                particle.y = randomRange(7, 13);
+            }
+
+            const index = i * 12;
+            this.particleToWorld(particle, positions, index);
+            const cx = positions[index];
+            const cy = positions[index + 1];
+            const cz = positions[index + 2];
+            const half = particle.size * (0.75 + intensity * 0.75);
+
+            positions[index] = cx - right.x * half;
+            positions[index + 1] = cy - right.y * half;
+            positions[index + 2] = cz - right.z * half;
+            positions[index + 3] = cx + right.x * half;
+            positions[index + 4] = cy + right.y * half;
+            positions[index + 5] = cz + right.z * half;
+            positions[index + 6] = cx - up.x * half;
+            positions[index + 7] = cy - up.y * half;
+            positions[index + 8] = cz - up.z * half;
+            positions[index + 9] = cx + up.x * half;
+            positions[index + 10] = cy + up.y * half;
+            positions[index + 11] = cz + up.z * half;
+        }
+
+        this.scene.app.drawLineArrays(positions, snowColor, false, this.scene.gizmoLayer);
+        this.drawSnowOverlay(count);
+        return count * 2;
+    }
+
+    private drawRainOverlay(count: number) {
+        const ctx = this.overlayContext;
+        if (!ctx) {
+            return;
+        }
+
+        const width = this.overlay.width;
+        const height = this.overlay.height;
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineWidth = Math.max(1, 1.2 * this.overlayScale);
+        ctx.strokeStyle = 'rgba(165, 205, 255, 0.68)';
+        ctx.shadowColor = 'rgba(120, 170, 255, 0.28)';
+        ctx.shadowBlur = 3 * this.overlayScale;
+
+        for (let i = 0; i < count; i++) {
+            const particle = this.rain[i];
+            const x = width * ((particle.x + 20) / 40);
+            const y = height * ((13 - particle.y) / 21);
+            const length = particle.length * 18 * this.overlayScale;
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x - length * 0.42, y + length);
+            ctx.stroke();
+        }
+
+        ctx.restore();
+    }
+
+    private drawSnowOverlay(count: number) {
+        const ctx = this.overlayContext;
+        if (!ctx) {
+            return;
+        }
+
+        const width = this.overlay.width;
+        const height = this.overlay.height;
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.fillStyle = 'rgba(248, 252, 255, 0.9)';
+        ctx.strokeStyle = 'rgba(248, 252, 255, 0.7)';
+        ctx.shadowColor = 'rgba(220, 240, 255, 0.45)';
+        ctx.shadowBlur = 4 * this.overlayScale;
+
+        for (let i = 0; i < count; i++) {
+            const particle = this.snow[i];
+            const x = width * ((particle.x + 21) / 42);
+            const y = height * ((13 - particle.y) / 20);
+            const radius = Math.max(1.2, particle.size * 18 * this.overlayScale);
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+
+            if (i % 3 === 0) {
+                ctx.lineWidth = Math.max(1, 0.8 * this.overlayScale);
+                ctx.beginPath();
+                ctx.moveTo(x - radius * 1.7, y);
+                ctx.lineTo(x + radius * 1.7, y);
+                ctx.moveTo(x, y - radius * 1.7);
+                ctx.lineTo(x, y + radius * 1.7);
+                ctx.stroke();
+            }
+        }
+
+        ctx.restore();
+    }
+
+    private updateLightning(deltaTime: number) {
         if (this.settings.mode !== 'storm') {
             return;
         }
