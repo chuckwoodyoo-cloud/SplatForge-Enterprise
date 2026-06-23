@@ -1,11 +1,11 @@
 import { ColorPicker, Container, Label, SliderInput } from '@playcanvas/pcui';
 import { Color } from 'playcanvas';
 
+import { SetSplatColorAdjustmentOp } from '../edit-ops';
 import { Events } from '../events';
+import { Splat } from '../splat';
 import { localize } from './localization';
 import { Tooltips } from './tooltips';
-import { SetSplatColorAdjustmentOp } from '../edit-ops';
-import { Splat } from '../splat';
 
 // pcui slider doesn't include start and end events
 class MyFancySliderInput extends SliderInput {
@@ -430,6 +430,12 @@ class ColorPanel extends Container {
         });
 
         events.on('viewPanel.visible', (visible: boolean) => {
+            if (visible) {
+                setVisible(false);
+            }
+        });
+
+        events.on('environmentPanel.visible', (visible: boolean) => {
             if (visible) {
                 setVisible(false);
             }

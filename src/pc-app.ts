@@ -17,7 +17,7 @@ import {
     // LayoutChildComponentSystem,
     // LayoutGroupComponentSystem,
     // ModelComponentSystem,
-    // ParticleSystemComponentSystem,
+    ParticleSystemComponentSystem,
     RenderComponentSystem,
     // RigidBodyComponentSystem,
     // ScreenComponentSystem,
@@ -106,7 +106,8 @@ class PCApp extends AppBase {
             // AudioSourceComponentSystem,
             // SoundComponentSystem,
             // AudioListenerComponentSystem,
-            // ParticleSystemComponentSystem,
+            // @ts-ignore
+            ParticleSystemComponentSystem,
             // ScreenComponentSystem,
             // ElementComponentSystem,
             // ButtonComponentSystem,
